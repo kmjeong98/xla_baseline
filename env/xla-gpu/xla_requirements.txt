@@ -1,0 +1,4 @@
+--index-url https://storage.googleapis.com/pytorch-xla-releases/wheels/cuda/12.6/torch_xla-2.7.0-cp310-cp310-manylinux_2_28_x86_64.whl
+--extra-index-url https://pypi.org/simple
+
+torch_xla
