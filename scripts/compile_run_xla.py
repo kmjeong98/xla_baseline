@@ -1,54 +1,115 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""compile_xla.py – Run benchmarks on **PyTorch XLA back‑end**.
-
-* Mirrors the CLI/output format of compile_iree.py but executes the model on an
-  XLA device (TPU, XLA‑CPU, or GPU‑via‑PJRT) instead of compiling with IREE.
-* Measures **first‑step latency** after graph compilation (warm‑up + mark_step).
-* Saves per‑run CSV to results/xla_latency_<tag>.csv and prints stdout summary.
-
-Example
--------
-$ python -m scripts.compile_xla conv resnet --device xla
-$ python -m scripts.compile_xla             # all models, default xla:cpu
 """
+compile_xla.py – Run benchmarks on **PyTorch XLA back-end** (TPU / XLA-CPU /
+PJRT-GPU). 10-step warm-up + 10-step measurement, avg/min/max latency,
+(가능할 경우) peak GPU 메모리 기록, CSV 저장.
+
+Environment
+-----------
+PJRT_DEVICE=CUDA  # GPU-via-PJRT 강제
+"""
+
 from __future__ import annotations
 
-import argparse, csv, os, time, sys
+import argparse, csv, os, sys, time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-
-import torch
-import torch_xla
-import torch_xla.core.xla_model as xm
+from typing import Any, List, Tuple, Union
 
 
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))  # add parent to PYTHONPATH
-sys.path.append(str(Path(__file__).resolve().parent.parent))  # add scripts to PYTHONPATH
+# ──────────────────────────────────────────────────────────────────────
+# repo paths
+# ──────────────────────────────────────────────────────────────────────
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.extend([str(ROOT_DIR), str(ROOT_DIR / "scripts")])
 
 from scripts.pytorch_baseline import load_model, _discover_models
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-print(f"ROOT_DIR: {ROOT_DIR}")
-MODEL_DIR   = ROOT_DIR / "models"
-UTIL_DIR    = ROOT_DIR / "utils"
 RESULTS_DIR = ROOT_DIR / "results" / "xla"
+DUMP_DIR = RESULTS_DIR / "dump"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+DUMP_DIR.mkdir(parents=True, exist_ok=True)
 
-OUT_DIR = RESULTS_DIR / "xla_out"
 
 
-# ---------------------------------------------------------------------------
+
+# ──────────────────────────────────────────────────────────────────────
+# PJRT 환경변수 – torch_xla import **이전** 설정
+# ──────────────────────────────────────────────────────────────────────
+os.environ["PJRT_DEVICE"] = "CUDA"   # GPU(PJRT) 사용
+
+# 필요시 메모리 풀 축소:
+os.environ["XLA_PJRT_GPU_ALLOCATOR"] = "platform"  # 또는 "default"
+
+os.environ["XLA_PJRT_GPU_PINNED_MEMORY_POOL_SIZE"] = "256M" 
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_FLAGS"] = f"--xla_gpu_enable_triton_gemm=true \
+                           --xla_dump_to={DUMP_DIR} \
+                           --xla_dump_hlo_as_text \
+                           --xla_dump_hlo_pass_re=.* \
+                           --xla_dump_hlo_module_re=.* \
+                           --xla_dump_hlo_as_dot=true"
+                           # --xla_hlo_profile -> unsupported on GPU
+
+
+import torch
+import torch_xla.core.xla_model as xm
+import torch_xla.runtime as xr
+
+# ──────────────────────────────────────────────────────────────────────
 # helpers
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────
+def _memory_used_mb(device) -> Union[float, None]:
+    """
+    Return *used* memory on XLA device in MB or None if unsupported.
 
-def _init_dir(model: str) -> None:
-    for d in (RESULTS_DIR, OUT_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    TPU          → dict{'kb_free','kb_total'}
+    PJRT-GPU     → tuple(kb_free, kb_total)   (torch-xla 2.3)
+    Unavailable  → RuntimeError or dict missing keys
+    """
+    try:
+        info = xm.get_memory_info(device)
+        # print(info)
+    except Exception as e: 
+        print(f"[MemInfo Error] {type(e).__name__}: {e}", file=sys.stderr)
+        return None
 
-def make_inputs(dummy: Any, device):
+    # PJRT-GPU
+    if isinstance(info, dict) and "bytes_used" in info:
+        return info["bytes_used"] / 1024.0 / 1024.0  # bytes to MB
+
+    # TPU
+    if isinstance(info, dict) and "kb_total" in info:
+        return ((info["kb_total"] - info["kb_free"]) / 1024.0 )  # bytes to MB
+
+    # TPU SPMD
+    if isinstance(info, (tuple, list)) and len(info) == 2:
+        kb_free, kb_total = info
+        return ((kb_total - kb_free) / 1024.0 )  # bytes to MB
+
+    
+    print(f"[MemInfo Error] Unexpected format: {type(info)}", file=sys.stderr)
+    return None
+
+    return used_kb / 1024.0
+
+
+def _fmt_line(name: str,
+              device: str,
+              avg: float,
+              mn: float,
+              mx: float,
+              mem: Union[float, None],
+              pad: int) -> str:
+    mem_str = f"{mem:8.2f} MB" if mem is not None else "   n/a"
+    return (f"{name:<{pad}s} | {device:<7s} | "
+            f"{avg:>10.3f} / {mn:>10.3f} / {mx:>10.3f} ms | {mem_str}")
+
+
+def _make_inputs(dummy: Any, device):
     if isinstance(dummy, tuple):
-        if len(dummy) == 2 and isinstance(dummy[0], torch.Tensor):
+        if all(isinstance(t, torch.Tensor) for t in dummy):
             return tuple(t.to(device) for t in dummy)
         return (torch.randn(*dummy, device=device),)
     if isinstance(dummy, dict):
@@ -56,70 +117,122 @@ def make_inputs(dummy: Any, device):
     return (dummy.to(device),)
 
 
-def run_one(model: torch.nn.Module, dummy: Any, *, device: str) -> float:
-    model.to(device).train(False)
-    inputs = make_inputs(dummy, device)
+# ──────────────────────────────────────────────────────────────────────
+# measurement
+# ──────────────────────────────────────────────────────────────────────
+def _measure(model: torch.nn.Module,
+             dummy: Any,
+             *,
+             device,
+             warmup: int,
+             repeats: int) -> Tuple[float, float, float, Union[float, None]]:
+    model.to(device).eval()
+    inputs = _make_inputs(dummy, device)
+
+    # print("Device memory info:")
+    # print(xm.get_memory_info())
+    
 
     def _call():
         with torch.no_grad():
             if isinstance(inputs, dict):
-                _ = model(**inputs)
+                out = model(**inputs)
             elif isinstance(inputs, tuple):
-                _ = model(*inputs)
+                out = model(*inputs)
             else:
-                _ = model(inputs)
+                out = model(inputs)
+        return out
 
-    # compile graph – first step
-    _call(); xm.mark_step()
-    # warm‑up 4 more
-    for _ in range(4):
-        _call(); xm.mark_step()
+    # ─ warm-up (graph compile) ─────────────────────────────────────────
+    for _ in range(warmup):
+        _ = _call(); xm.mark_step()
+    xm.wait_device_ops()
 
-    # timed step
-    t0 = time.perf_counter()
-    _call(); xm.mark_step()
-    xm.wait_device_ops()  # sync
-    return (time.perf_counter() - t0) * 1000.0  # ms
+    peak_mem = _memory_used_mb(device)  # None if unsupported
+    latencies: List[float] = []
 
-# ---------------------------------------------------------------------------
+    # ─ measurement ─────────────────────────────────────────────────────
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        out = _call(); xm.mark_step()
+        xm.wait_device_ops()
+        latencies.append((time.perf_counter() - t0) * 1000.0)
+
+        cur = _memory_used_mb(device)
+        if peak_mem is not None and cur is not None:
+            peak_mem = max(peak_mem, cur)
+
+    # ─ copy result to CPU (exclude comm cost) ──────────────────────────
+    if isinstance(out, torch.Tensor):
+        out.cpu()
+    elif isinstance(out, (tuple, list)):
+        [o.cpu() for o in out if isinstance(o, torch.Tensor)]
+
+    avg_ms = sum(latencies) / len(latencies)
+    return avg_ms, min(latencies), max(latencies), peak_mem
+
+
+# ──────────────────────────────────────────────────────────────────────
 # main
-# ---------------------------------------------------------------------------
-
-def main():
+# ──────────────────────────────────────────────────────────────────────
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("model", nargs="*", help="model keys; omit for ALL")
-    ap.add_argument("--device", default="xla:1", help="xm.xla_device() spec, e.g. 'xla', 'xla:1'")
-    ap.add_argument("--csv", action="store_true", help="write results/xla_latency_*.csv")
+    ap.add_argument("--device", default="xla:1",
+                    help="XLA device spec, e.g. 'xla', 'xla:0', 'xla:1'")
+    ap.add_argument("--warmup", type=int, default=10, help="# warm-up steps")
+    ap.add_argument("--repeats", type=int, default=10, help="# measured steps")
+    ap.add_argument("--csv_path", help="Custom CSV path")
     args = ap.parse_args()
 
+    device = xm.xla_device() if args.device.startswith("xla") else torch.device(args.device)
     models = args.model if args.model else _discover_models()
-    device = xm.xla_device() if args.device == "xla:1" else torch.device(args.device)
-    out_rows: list[list[str]] = []
+    pad = max(len(m) for m in models) + 2
+
+    header = ("model".ljust(pad) +
+              " | device  |    avg /     min /     max (ms) | peak MB")
+    print("─" * len(header))
+    print(header)
+    print("─" * len(header))
+
     ts = datetime.now().isoformat(timespec="seconds")
+    csv_header = ["timestamp", "model_name", "device",
+                  "warmup", "repeats",
+                  "latency_avg_ms", "latency_min_ms", "latency_max_ms",
+                  "peak_memory_mb"]
+    rows: List[List[str]] = []
 
     for name in models:
         try:
             mdl, dummy = load_model(name)
-            ms = run_one(mdl, dummy, device=device)
-            print(f"{name:10s} | {device} | {ms:9.3f} ms")
-            out_rows.append([ts, name, str(device), f"{ms:.3f}"])
+            avg, mn, mx, mem = _measure(
+                mdl, dummy, device=device,
+                warmup=args.warmup, repeats=args.repeats)
+            print(_fmt_line(name, str(device), avg, mn, mx, mem, pad))
+            rows.append([ts, name, str(device),
+                         args.warmup, args.repeats,
+                         f"{avg:.3f}", f"{mn:.3f}", f"{mx:.3f}",
+                         f"{mem:.2f}" if mem is not None else "n/a"])
         except Exception as e:
             reason = str(e).splitlines()[0]
             print(f"[ERROR] {name}: {reason}")
-            out_rows.append([ts, name, str(device), f"error: {reason}"])
+            rows.append([ts, name, str(device),
+                         args.warmup, args.repeats,
+                         "ERROR", "ERROR", "ERROR", reason])
 
-    if args.csv:
-        tag = "all" if not args.model else "_".join(args.model)
-        csv_path = Path("results/xla_latency_" + tag + ".csv")
-        csv_path.parent.mkdir(exist_ok=True)
-        idx, cand = 1, csv_path
-        while cand.exists():
-            cand = csv_path.with_stem(csv_path.stem + f"_{idx}"); idx += 1
-        with cand.open("a", newline="") as f:
-            csv.writer(f).writerows(out_rows)
-        print(f"[✓] CSV saved → {cand}")
+    # ─ CSV 저장 ─────────────────────────────────────────────────────────
+    tag = "all" if not args.model else "_".join(args.model)
+    default_csv = RESULTS_DIR / f"xla_metrics_{tag}_{device}.csv"
+    csv_path = Path(args.csv_path) if args.csv_path else default_csv
+    with csv_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(csv_header)
+        writer.writerows(rows)
+
+    print("─" * len(header))
+    print(f"[✓] CSV saved → {csv_path}")
+
 
 if __name__ == "__main__":
-    os.environ.setdefault("PJRT_DEVICE", "")  # silence PJRT warning noise
     main()
 

@@ -19,8 +19,15 @@ from typing import Any, Iterable
 import torch
 from torch_xla.stablehlo import exported_program_to_stablehlo
 
-# PJRT 디바이스 워닝 억제 (빈 문자열 = 런타임 default)
-os.environ.setdefault("PJRT_DEVICE", "")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.extend([str(ROOT_DIR), str(ROOT_DIR / "scripts")])
+
+from scripts.pytorch_baseline import load_model, _discover_models
+
+RESULTS_DIR = ROOT_DIR / "results" / "xla"
+DUMP_DIR = RESULTS_DIR / "dump"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+DUMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 모델 블록 로딩
@@ -73,11 +80,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("model", nargs="*", help="model keys; omit = all discovered")
     ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
-    ap.add_argument("--outdir", default="results/xla", help="output directory")
     ap.add_argument("--csv", action="store_true", help="append csv log")
     args = ap.parse_args()
 
-    outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
     keys: Iterable[str] = args.model or discover_model_keys()
     timestamp = datetime.now().isoformat(timespec="seconds")
     rows: list[list[str]] = []
@@ -94,8 +99,11 @@ def main() -> None:
             ep = torch.export.export(model, make_inputs(dummy))
             shlo = exported_program_to_stablehlo(ep)
 
-            dest = outdir / f"{name}_stablehlo"
-            shlo.save(dest)  # 디렉터리 생성 & MLIR/weights 저장
+            SHLO_DIR = RESULTS_DIR / "StableHLO"
+            SHLO_DIR.mkdir(parents=True, exist_ok=True)
+
+            dest = SHLO_DIR / f"{name}_stablehlo"
+            shlo.save(dest)  
             print(f"   ✓ saved → {dest}")
             rows.append([timestamp, name, "ok", ""])
         except Exception as e:
@@ -104,7 +112,7 @@ def main() -> None:
             rows.append([timestamp, name, "error", reason])
 
     if args.csv:
-        log = outdir / "xla_export_log.csv"
+        log = RESULTS_DIR / "xla_export_log.csv"
         with log.open("a", newline="") as f:
             csv.writer(f).writerows(rows)
         print(f"[✓] log appended → {log}")
