@@ -27,7 +27,7 @@ sys.path.extend([str(ROOT_DIR), str(ROOT_DIR / "scripts")])
 from scripts.pytorch_baseline import load_model, _discover_models
 
 RESULTS_DIR = ROOT_DIR / "results" / "xla"
-DUMP_DIR = RESULTS_DIR / "dump"
+DUMP_DIR = RESULTS_DIR / "dump_hlo"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 DUMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -44,13 +44,15 @@ os.environ["XLA_PJRT_GPU_ALLOCATOR"] = "platform"  # 또는 "default"
 
 os.environ["XLA_PJRT_GPU_PINNED_MEMORY_POOL_SIZE"] = "256M" 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_FLAGS"] = f"--xla_gpu_enable_triton_gemm=true \
-                           --xla_dump_to={DUMP_DIR} \
-                           --xla_dump_hlo_as_text \
-                           --xla_dump_hlo_pass_re=.* \
-                           --xla_dump_hlo_module_re=.* \
-                           --xla_dump_hlo_as_dot=true"
+os.environ["XLA_FLAGS"] = (
+                            # f"--xla_gpu_enable_triton_gemm=true"
+                            f"--xla_dump_to={DUMP_DIR}/proto "
+                            f"--xla_dump_hlo_pass_re=.* "
+                            # f"--xla_dump_hlo_as_text "
+                             "--xla_dump_hlo_as_proto "
+                             # "--xla_dump_hlo_as_dot=true"
                            # --xla_hlo_profile -> unsupported on GPU
+                            )
 
 
 import torch

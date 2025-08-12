@@ -34,7 +34,7 @@ EARLY_ARGS, _ = early_parser.parse_known_args()
 ROOT_DIR   = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT_DIR / "results" / "xla"
 STABLE_DIR  = RESULTS_DIR / "StableHLO"
-DUMP_DIR    = RESULTS_DIR / "dump"
+DUMP_DIR    = RESULTS_DIR / "dump_shlo/proto"
 for d in (RESULTS_DIR, STABLE_DIR, DUMP_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
@@ -50,12 +50,11 @@ os.environ.setdefault("XLA_STABLEHLO_COMPILE", "1")
 
 if EARLY_ARGS.dump:  # ← dump 옵션이 있을 때만 플래그 구성
     os.environ["XLA_FLAGS"] = (
-        f"--xla_gpu_enable_triton_gemm=true "
         f"--xla_dump_to={DUMP_DIR} "
-        f"--xla_dump_hlo_as_text "
         f"--xla_dump_hlo_pass_re=.* "
-        f"--xla_dump_hlo_module_re=.* "
-        f"--xla_dump_hlo_as_dot=true"
+        "--xla_dump_hlo_as_proto "
+        # f"--xla_dump_hlo_as_text "
+        # f"--xla_dump_hlo_as_dot=true"
     )
 
 import torch
