@@ -1,5 +1,0 @@
-WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-I0000 00:00:1754292412.518147   23046 se_gpu_pjrt_client.cc:951] Using BFC allocator.
-I0000 00:00:1754292412.518307   23046 gpu_helpers.cc:136] XLA backend allocating 18945048576 bytes on device 0 for BFCAllocator.
-I0000 00:00:1754292412.518354   23046 gpu_helpers.cc:177] XLA backend will use up to 6315016192 bytes on device 0 for CollectiveBFCAllocator.
-I0000 00:00:1754292412.535007   23046 cuda_dnn.cc:529] Loaded cuDNN version 90101
