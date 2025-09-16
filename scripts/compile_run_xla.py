@@ -37,7 +37,7 @@ DUMP_DIR.mkdir(parents=True, exist_ok=True)
 # ──────────────────────────────────────────────────────────────────────
 # PJRT 환경변수 – torch_xla import **이전** 설정
 # ──────────────────────────────────────────────────────────────────────
-os.environ["PJRT_DEVICE"] = "CUDA"   # GPU(PJRT) 사용
+# os.environ["PJRT_DEVICE"] = "CUDA"   # GPU(PJRT) 사용
 
 # 필요시 메모리 풀 축소:
 os.environ["XLA_PJRT_GPU_ALLOCATOR"] = "platform"  # 또는 "default"
@@ -56,6 +56,7 @@ os.environ["XLA_FLAGS"] = (
 
 
 import torch
+import torch_xla
 import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 
@@ -147,7 +148,7 @@ def _measure(model: torch.nn.Module,
 
     # ─ warm-up (graph compile) ─────────────────────────────────────────
     for _ in range(warmup):
-        _ = _call(); xm.mark_step()
+        _ = _call(); torch_xla.sync()
     xm.wait_device_ops()
 
     peak_mem = _memory_used_mb(device)  # None if unsupported
@@ -156,7 +157,7 @@ def _measure(model: torch.nn.Module,
     # ─ measurement ─────────────────────────────────────────────────────
     for _ in range(repeats):
         t0 = time.perf_counter()
-        out = _call(); xm.mark_step()
+        out = _call(); torch_xla.sync()
         xm.wait_device_ops()
         latencies.append((time.perf_counter() - t0) * 1000.0)
 
