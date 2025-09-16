@@ -9,7 +9,7 @@ import torch.nn as nn
 class MatMul(nn.Module):
     """Minimal module that multiplies input by a learnable weight via torch.matmul."""
 
-    def __init__(self, in_features: int = 128, out_features: int = 64):
+    def __init__(self, in_features: int = 32, out_features: int = 4):
         super().__init__()
         # Learnable parameter with shape (in_features, out_features)
         self.weight = nn.Parameter(torch.randn(in_features, out_features))
@@ -32,5 +32,5 @@ def get_model() -> nn.Module:
 
 def get_dummy_input() -> tuple[int, int]:
     """Shape tuple for dummy input (to be random-filled elsewhere)."""
-    return (1, 128)
+    return (1, 32)
 
