@@ -108,7 +108,7 @@ Baseline performance using **native PyTorch** backend (no XLA). Run on CPU or CU
 
 ```bash
 # CUDA (if available)
-python scripts/pytorch_baseline.py --device cuda --model <MODEL>
+python scripts/pytorch_baseline.py --device cuda <MODEL>
 ```
 ---
 
@@ -121,7 +121,7 @@ python scripts/pytorch_baseline.py --device cuda --model <MODEL>
 ```bash
 # Intended usage (WIP):
 PJRT_DEVICE=CUDA \
-python scripts/compare_xla_torch.py --model <MODEL>
+python scripts/compare_xla_torch.py <MODEL>
 ```
 ---
 
@@ -131,7 +131,7 @@ Lower a `torch.nn.Module` **directly to HLO** and execute with **XLA compiler/ru
 
 ```bash
 PJRT_DEVICE=CUDA \
-python scripts/compile_run_xla.py --model <MODEL>
+python scripts/compile_run_xla.py <MODEL>
 ```
 ---
 
@@ -140,7 +140,7 @@ python scripts/compile_run_xla.py --model <MODEL>
 Export a PyTorch module to a **StableHLO bundle** (bytecode + weights).
 
 ```bash
-python scripts/export_torch_xla_stablehlo.py --model <MODEL>
+python scripts/export_torch_xla_stablehlo.py <MODEL>
 ```
 ---
 ### 5) `shlo_compile_run.py`
