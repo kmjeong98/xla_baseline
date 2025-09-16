@@ -1,4 +1,4 @@
-name: xla-gpu
+name: xla-gpu-test
 channels:
   - defaults
   - https://repo.anaconda.com/pkgs/main

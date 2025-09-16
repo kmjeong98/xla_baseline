@@ -1,15 +1,22 @@
 # Python 3.11
-"""Lightweight Conv→Conv→ReLU vision stub."""
 from __future__ import annotations
 import torch
 import torch.nn as nn
 
-class ConvConvReLU(nn.Module):
+# ───────────────────────────── SIZE ─────────────────────────────
+N, C, H, W = 16, 3, 32, 32
+OC, IC, KS = 8, 3, 3 # KS: Kernel Size
+
+LIN = OC * (H - KS + 1) * (W - KS + 1)
+
+# ───────────────────────────── MODEL ─────────────────────────────
+class ConvLinearReLU(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(3, 16, 3, padding=1),
-            nn.Conv2d(16, 16, 3, padding=1),
+            nn.Conv2d(IC, OC, kernel_size=int(KS), stride=1, padding=0, bias=True),
+            nn.Flatten(),
+            nn.Linear(LIN, N, bias=True),
             nn.ReLU(),
         )
 
@@ -18,9 +25,13 @@ class ConvConvReLU(nn.Module):
 
 # ───────────────────────────── API ─────────────────────────────
 def get_model() -> nn.Module:
-    return ConvConvReLU()
+    return ConvLinearReLU()
 
 def get_dummy_input() -> tuple[int, int, int, int]:
     """Return shape tuple — will be random-filled elsewhere."""
-    return (1, 3, 224, 224)
+    return (N, C, H, W)
 
+# m = get_model().eval()
+# print(m)
+# x = torch.randn(get_dummy_input())
+# y= m(x)
