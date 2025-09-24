@@ -33,12 +33,13 @@ DUMP_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR = Path(__file__).parent.parent / "models"
 
 def discover_model_keys() -> list[str]:
-    """models/ 폴더의 모든 → key 추출"""
+    """models/ 폴더의 모든 → key 추출 (맨 앞글자가 '_'인 파일 제외)"""
     return sorted(
         f.stem
         for f in MODELS_DIR.glob("*.py")
-        if f.is_file()
+        if f.is_file() and not f.stem.startswith("_")
     )
+
 
 def load_model(name: str, device: str = "cpu") -> tuple[torch.nn.Module, Any]:
     """
