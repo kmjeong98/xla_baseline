@@ -48,7 +48,7 @@ conda activate torch-xla-cpu
 
 ### Option B) Use the official prebuilt Docker image
 Torch_XLA provides prebuilt docker images, and you can get tag list by this command below. 
-(Install [gcloud](https://cloud.google.com/sdk/docs/install?hl=ko) by following this instruction. )
+(Install [gcloud](https://cloud.google.com/sdk/docs/install?hl=ko) by following this instruction.)
 ```bash
 gcloud artifacts docker tags list us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla
 ````
@@ -66,7 +66,7 @@ docker run \
 
 docker exec -it torch-xla-prebuilt /bin/bash
 ````
-Then, install [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive)
+Then, install [CUDA Toolkit](https://developer.nvidia.com/cuda-12-8-0-download-archive).
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
