@@ -1,23 +1,24 @@
 # xla_baseline
 
-_OpenXLA compiler benchmarks & debugging tools_
+_OpenXLA compiler benchmarks and debugging tools_
 
-This repository contains small, focused scripts to:
+This repository provides small, focused scripts to:
 - run **PyTorch baselines**,
 - execute the same models through **PyTorch/XLA** (PJRT),
 - **export** models to **StableHLO** bundles,
-- and **compile/run** StableHLO through the XLA compiler/runtime.
+- and **compile/run** StableHLO via the XLA compiler/runtime.
 
 ---
+
 ## Repository layout
 
 ```
 
 xla\_baseline/
-├─ env/           # (env helpers, e.g., docker or setup notes if present)
+├─ env/           # environment helpers, e.g., Docker or Conda definitions
 ├─ models/        # small reference models (see below)
 ├─ scripts/       # all entry-point scripts
-└─ utils/         # helpers (timing, model loader, I/O, etc.)
+└─ utils/         # helpers
 
 ````
 
@@ -27,112 +28,126 @@ xla\_baseline/
 
 ## Prerequisites
 
-- **Python**: 3.10–3.11 recommended
-- **PyTorch**: a version compatible with your chosen **torch-xla**
-- **torch-xla / PJRT**:
-  - **CUDA** (NVIDIA) or other PJRT backends supported by OpenXLA
-  - For CUDA: a matching **CUDA toolkit / cuDNN** on the host (if running natively)
-- Optional for dumps/visualization:
-  - **graphviz** (`dot`) if you plan to render `.dot` graphs
+- **Python**: ≥ 3.10 recommended  
+- **PyTorch / torch-xla**: Match major versions (e.g., `torch 2.8.x` with `torch_xla 2.8.x`)
 
 ---
 
 ## Installation
 
+Clone the repository:
 ```bash
 git clone https://github.com/HaeeunJeong/xla_baseline.git
 cd xla_baseline
 ````
 
-Install **torch-xla** either from **source** (A) or using the **official Docker** image (B). Follow PyTorch/XLA’s recommendations for your platform.
+If you target CPU, use **Option A**. For CUDA, use **Option B** or **Option C**.
 
-### Option A) Build PyTorch/XLA from source
-
-This path gives you full control and latest changes, but takes longer.
-
-1. Install a PyTorch build compatible with your target (CUDA / CPU).
-2. Build and install `torch_xla` following the instructions in the official PyTorch/XLA README (match versions!).
-3. Verify:
+### Option A) Create a Conda environment
 
 ```bash
-python - <<'PY'
-import torch, torch_xla
-print("torch:", torch.__version__)
-print("torch_xla:", torch_xla.__version__)
-PY
+conda env create -f env/torch-xla-cpu/environment.yml
+conda activate torch-xla-cpu
 ```
 
-### Option B) Use the official Docker image
+### Option B) Use the official prebuilt Docker image
 
-This is the quickest way to get a working PJRT/XLA environment for GPU.
-
-Example (CUDA-enabled host):
+PyTorch/XLA publishes prebuilt Docker images. List available tags with:
 
 ```bash
-# Make sure you have NVIDIA Container Toolkit installed on the host.
-# Then run an interactive container with GPUs and mount the repo.
-sudo docker run -it --rm \
+gcloud artifacts docker tags list us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla
+```
+
+Install the Google Cloud SDK as needed: [gcloud SDK install](https://cloud.google.com/sdk/docs/install?hl=ko).
+
+**Example (tested):** Tag `nightly_3.11_cuda_12.8_20250407`
+
+```bash
+docker run \
+  --net=host \
   --gpus all \
-  --name xla_gpu \
-  -w /work \
-  -v "$PWD":/work \
-  us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest \
-  bash
+  --shm-size=16g \
+  --name torch-xla-prebuilt \
+  -itv <host_dir>:<container_dir> \
+  -d us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla:nightly_3.11_cuda_12.8_20250407 /bin/bash
 
-# Inside the container:
-python -c "import torch, torch_xla; print(torch.__version__, torch_xla.__version__)"
+docker exec -it torch-xla-prebuilt /bin/bash
 ```
 
-### Option C) Use XLA on CPU
-
-This is the quickest way to get a working PJRT/XLA environment for CPU.
+Install CUDA Toolkit inside the container if required: [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive)
 
 ```bash
-conda env create --file env/xla-cpu/environment.yaml
-conda activate xla-cpu
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
+sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
+wget https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda-repo-ubuntu2404-12-8-local_12.8.0-570.86.10-1_amd64.deb
+sudo dpkg -i cuda-repo-ubuntu2404-12-8-local_12.8.0-570.86.10-1_amd64.deb
+sudo cp /var/cuda-repo-ubuntu2404-12-8-local/cuda-*-keyring.gpg /usr/share/keyrings/
+sudo apt-get update
+sudo apt-get -y install cuda-toolkit-12-8
 ```
+
+Reinstall PyTorch if needed:
+
+```bash
+pip uninstall -y torch
+pip install torch
+```
+
+### Option C) Build PyTorch/XLA from source
+
+**Status:** Work in progress.
+Reference guides: [PyTorch/XLA GPU guide](https://docs.pytorch.org/xla/master/gpu.html), [Contributing](https://github.com/pytorch/xla/blob/master/CONTRIBUTING.md).
 
 ---
 
 ## Quick start: scripts
 
-All entry points live under `scripts/`. Use `--help` on each script to see available flags (batch size, device, model name, etc.).
+All entry points live under `scripts/`.
 
-> **Environment variables** commonly used with PJRT:
+> **Common PJRT environment variables**
 >
-> * `PJRT_DEVICE=CUDA` (for NVIDIA GPU), etc.
+> * `PJRT_DEVICE=CUDA` for NVIDIA GPUs.
 
 ### 1) `pytorch_baseline.py`
 
-Baseline performance using **native PyTorch** backend (no XLA). Run on CPU or CUDA directly.
+Baseline performance using native **PyTorch** (no XLA).
 
 ```bash
+# CPU
+python scripts/pytorch_baseline.py --device cpu <MODEL>
+
 # CUDA (if available)
 python scripts/pytorch_baseline.py --device cuda <MODEL>
 ```
+
+Notes:
+
+* Default `--device` is `cuda`.
+* If `<MODEL>` is omitted, all models in `models/` are used.
+* Save results to CSV with `--csv_path <PATH>`.
+
 ---
 
 ### 2) `compare_xla_torch.py`
 
-> **Status:** *Work in progress.*
-> Goal: compare **torch backend** vs **XLA backend** on **GPU target**.
-> **Known issue:** the “torch backend” code-path currently falls back to **CPU**.
+Compare execution under native PyTorch vs. PyTorch/XLA.
 
 ```bash
-# Intended usage (WIP):
 PJRT_DEVICE=CUDA \
 python scripts/compare_xla_torch.py <MODEL>
 ```
+
 ---
 
 ### 3) `compile_run_xla.py`
 
-Lower a `torch.nn.Module` **directly to HLO** and execute with **XLA compiler/runtime**.
+Lower a `torch.nn.Module` to **HLO** and execute with the **XLA compiler/runtime**.
 
 ```bash
 PJRT_DEVICE=CUDA \
 python scripts/compile_run_xla.py <MODEL>
 ```
+
 ---
 
 ### 4) `export_torch_xla_stablehlo.py`
@@ -142,10 +157,12 @@ Export a PyTorch module to a **StableHLO bundle** (bytecode + weights).
 ```bash
 python scripts/export_torch_xla_stablehlo.py <MODEL>
 ```
+
 ---
+
 ### 5) `shlo_compile_run.py`
 
-Take a **StableHLO bundle** and run it through the **XLA compiler/runtime** (PJRT).
+Load a **StableHLO bundle** and run it through the **XLA compiler/runtime** (PJRT).
 
 ```bash
 PJRT_DEVICE=CUDA \
@@ -154,74 +171,78 @@ python scripts/shlo_compile_run.py \
   --batch 32
 ```
 
-**What it does:**
-
-* loads the StableHLO bundle,
-* invokes PJRT to compile and execute,
-* prints timing and (optionally) numerical checks.
+It loads the bundle, invokes PJRT to compile and execute, and prints timing and optional checks.
 
 ---
 
 ## Models
 
-All reference models live in `models/`. Typical items you’ll find include:
+All reference models live in `models/`.
 
-* **Tiny CNNs / MLPs** for smoke tests (e.g., simple Conv→Conv→ReLU blocks),
-* Minimal transformer-ish blocks to stress matmul/softmax paths,
-* Utility functions `get_model(name)` and `get_dummy_input(name)` used by scripts.
+**Supported models**
 
-> If you add a new model:
->
-> 1. Implement it under `models/` (e.g., `my_model.py`).
-> 2. Expose a factory like:
->
->    ```python
->    def get_model(): ...
->    def get_dummy_input(): ...
->    ```
-> 3. Register the model name in the script’s model registry (if applicable).
+| Category        | Key         | Source                                      | Notes                                    |
+| --------------- | ----------- | ------------------------------------------- | ---------------------------------------- |
+| Simple custom   | `mm`        | `models/mm_block.py`                        | Simple matrix multiplication kernel      |
+| Simple custom   | `conv`      | `models/conv_block.py`                      | Conv–Flatten–Linear–ReLU toy block       |
+| **GNN**         | `gcn`       | `models/gcn_block.py`                       | Graph Convolution Network                |
+| **GNN**         | `graphsage` | PyTorch Geometric                           | GraphSAGE                                |
+| **GNN**         | `gat`       | PyTorch Geometric                           | Graph Attention Network                  |
+| **GNN**         | `gatv2`     | PyTorch Geometric                           | Graph Attention Network v2               |
+| **CNN**         | `resnet`    | `torchvision` ResNet-18                     | Image backbone, ImageNet pretrained      |
+| **CNN**         | `mobilenet` | `torchvision` MobileNet v3-S                | Mobile-oriented CNN, ImageNet pretrained |
+| **Transformer** | `vit`       | `torchvision` ViT-B/16                      | Vision Transformer baseline              |
+| **Transformer** | `bert`      | `bert-base-uncased`                         | Token-level encoder                      |
+| **Transformer** | `gpt2`      | `gpt2`                                      | Decoder baseline                         |
+| **LLM**         | `llama`     | `meta-llama/Llama-3.2-1B`                   | Compact general-purpose LLM              |
+| **LLM**         | `deepseek`  | `Deepseek-ai/deepseek-R1-Distill-Qwen-1.5B` | Distilled math-centric LLM               |
+
+Utilities `get_model(name)` and `get_dummy_input(name)` are used by scripts.
+
+### Enable Hugging Face models
+
+First log in to Hugging Face and create a token with `read` scope.
+
+```bash
+pip install -U "huggingface_hub[cli]"
+hf auth login
+```
+
+### Add a new model
+
+1. Implement the model under `models/` (e.g., `my_model.py`).
+2. Expose factories:
+
+```python
+def get_model(): ...
+def get_dummy_input(): ...
+
+# For Hugging Face models also import:
+from ._hf_wrapper import HFWrapper
+```
 
 ---
 
-## Tips: XLA debugging & dumps
+## Tips: XLA debugging and dumps
 
-* **Quick IR/HLO dump**
+**Quick IR/HLO dump**
 
-  ```bash
-  export XLA_FLAGS="--xla_dump_to=./out"
-  ```
+```bash
+export XLA_FLAGS="--xla_dump_to=./out"
+```
 
-  This writes unoptimized/optimized HLO and other artifacts per compilation.
+Writes unoptimized/optimized HLO and related artifacts per compilation.
 
-* **Auto-metrics / profiler hints**
+**Auto-metrics and profiler hints**
 
-  ```bash
-  export PT_XLA_DEBUG_LEVEL=2
-  ```
+```bash
+export PT_XLA_DEBUG_LEVEL=2
+```
 
-  Prints a summary of compile/execute counts, transfer hot spots, and any ops not lowered to XLA.
+Prints summaries of compile/execute counts, transfer hot spots, and ops not lowered to XLA.
 
-* **Append multiple XLA flags**
+**Append multiple XLA flags**
 
-  ```bash
-  export XLA_FLAGS="${XLA_FLAGS} --xla_dump_hlo_as_text --xla_gpu_enable_latency_hiding_scheduler=true"
-  ```
-
----
-
-## Troubleshooting
-
-* **Torch and torch-xla version mismatch**
-
-  * Ensure the **major/minor** versions match the PyTorch/XLA release matrix.
-* **CUDA backend not used / runs on CPU**
-
-  * Verify `PJRT_DEVICE=CUDA` and that the container/host sees GPUs (`nvidia-smi`).
-  * Check PyTorch reports a CUDA device in eager mode.
-* **Compilation too frequent (slow)**
-
-  * Avoid shape polymorphism; keep tensor shapes stable per step.
-  * Cache or reuse exported StableHLO bundles for repeated runs.
-* **Missing ops (not lowered)**
-
-  * The metrics report will list `aten::` ops routed to CPU. Consider model tweaks or newer torch-xla.
+```bash
+export XLA_FLAGS="${XLA_FLAGS} --xla_dump_hlo_as_text --xla_gpu_enable_latency_hiding_scheduler=true"
+```
