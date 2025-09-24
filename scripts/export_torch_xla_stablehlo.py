@@ -5,7 +5,7 @@ export_torch_xla_stablehlo.py
 ──────────────────────────────────────────────────────────────────────────────
 PyTorch  →  StableHLO  via torch-xla (exported_program_to_stablehlo).
 
-* 모델을 주지 않으면 models/ 디렉터리의 모든 *_block.py 를 자동 탐색합니다.
+* 모델을 주지 않으면 models/ 디렉터리의 모든 *.py 를 자동 탐색합니다.
 * 성공 :  results/xla/<name>_stablehlo/   디렉터리(MLIR+weights) 저장
 * 실패 :  STDOUT + CSV(results/xla_export_log.csv) 기록
 """
@@ -21,8 +21,6 @@ from torch_xla.stablehlo import exported_program_to_stablehlo
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.extend([str(ROOT_DIR), str(ROOT_DIR / "scripts")])
-
-from scripts.pytorch_baseline import load_model, _discover_models
 
 RESULTS_DIR = ROOT_DIR / "results" / "xla"
 DUMP_DIR = RESULTS_DIR / "dump"
@@ -42,12 +40,19 @@ def discover_model_keys() -> list[str]:
         if f.is_file()
     )
 
-def load_model_block(name: str, device: str = "cpu") -> tuple[torch.nn.Module, Any]:
+def load_model(name: str, device: str = "cpu") -> tuple[torch.nn.Module, Any]:
     """
-    import models/<name>_block.py  →
+    import models/<name>.py (dot in filename allowed) →
         get_model(), get_dummy_input()
     """
-    mod = importlib.import_module(f"models.{name}_block")
+    module_name = name.replace(".", "_")
+    file_path = MODELS_DIR / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module {name} from {file_path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
+    spec.loader.exec_module(mod)  # type: ignore
     model = mod.get_model().to(device).eval()
     dummy = mod.get_dummy_input()
     return model, dummy
@@ -90,7 +95,7 @@ def main() -> None:
     for name in keys:
         try:
             print(f"[{name}] torch_xla → StableHLO export …")
-            model, dummy = load_model_block(name, args.device)
+            model, dummy = load_model(name, args.device)
 
             # HF 모델이면 kwargs → positional 래퍼
             if isinstance(dummy, dict):
