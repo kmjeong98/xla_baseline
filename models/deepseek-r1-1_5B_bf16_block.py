@@ -1,9 +1,13 @@
 from __future__ import annotations
 import torch, transformers
-from models._hf_wrapper import HFWrapper
-ID, _SEQ = "meta-llama/Llama-3.2-1B", 32
+from ._hf_wrapper import HFWrapper
+ID, _SEQ = "deepseek-ai/deepseek-R1-Distill-Qwen-1.5B", 32
 
-def get_model(): return HFWrapper(transformers.AutoModel.from_pretrained(ID, torch_dtype=torch.bfloat16).eval())
+def get_model():
+    return HFWrapper(
+        transformers.AutoModel.from_pretrained(ID, torch_dtype=torch.bfloat16).eval()
+    )
+
 def get_dummy_input():
     tok = transformers.AutoTokenizer.from_pretrained(ID)
     vocab = tok.vocab_size
